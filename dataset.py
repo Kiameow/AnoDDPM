@@ -334,17 +334,21 @@ def load_datasets_for_test():
     training, testing = init_datasets("./", args)
 
     ano_dataset = AnomalousMRIDataset(
-            ROOT_DIR=f'DATASETS/CancerousDataset/EdinburghDataset/Anomalous-T1', img_size=args['img_size'],
+            ROOT_DIR=f'./dataset/test/FLAIR_test', MASK_DIR='dataset/test/mask_test', img_size=args['img_size'],
             slice_selection="random", resized=False
             )
 
     train_loader = init_dataset_loader(training, args)
     ano_loader = init_dataset_loader(ano_dataset, args)
 
+    train_loader_iter = iter(train_loader)
+    ano_loader_iter = iter(ano_loader)
+    
     for i in range(5):
-        new = next(train_loader)
-        new_ano = next(ano_loader)
-        output = torch.cat((new["image"][:10], new_ano["image"][:10]))
+        train_data_object = next(train_loader_iter)
+        ano_data_object = next(ano_loader_iter)
+        
+        output = torch.cat((train_data_object["image"][:10], ano_data_object["image"][:10]))
         plt.imshow(helpers.gridify_output(output, 5), cmap='gray')
         plt.show()
         plt.pause(0.0001)
@@ -352,10 +356,10 @@ def load_datasets_for_test():
 
 def init_datasets(ROOT_DIR, args):
     training_dataset = MRIDataset(
-            ROOT_DIR=f'{ROOT_DIR}DATASETS/Train/', img_size=args['img_size'], random_slice=args['random_slice']
+            ROOT_DIR=f'{ROOT_DIR}dataset/train/hc_FLAIR', img_size=args['img_size'], random_slice=args['random_slice']
             )
     testing_dataset = MRIDataset(
-            ROOT_DIR=f'{ROOT_DIR}DATASETS/Test/', img_size=args['img_size'], random_slice=args['random_slice']
+            ROOT_DIR=f'{ROOT_DIR}dataset/test/FLAIR_test', img_size=args['img_size'], random_slice=args['random_slice']
             )
     return training_dataset, testing_dataset
 
@@ -368,11 +372,17 @@ def init_dataset_loader(mri_dataset, args, shuffle=True):
                     num_workers=0, drop_last=True
                     )
             )
+    # dataset_loader = torch.utils.data.DataLoader(
+    #                     mri_dataset,
+    #                     batch_size=args['Batch_Size'], shuffle=shuffle,
+    #                     num_workers=0, drop_last=True
+    #                  )
+            
 
     return dataset_loader
 
 class ResizeWithPadding:
-    def __init__(self, target_size=(256, 256)):
+    def __init__(self, target_size=256):
         self.target_size = target_size
 
     def __call__(self, image):
@@ -421,7 +431,7 @@ class MRIDataset(Dataset):
                 # transforms.CenterCrop(235),
                 # transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR),
                 # transforms.CenterCrop(256),
-                ResizeWithPadding(target_size=img_size),
+                ResizeWithPadding(target_size=256),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5), (0.5))
             ]
@@ -441,7 +451,7 @@ class MRIDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
             
-        img_path = os.path.exists(os.path.join(self.ROOT_DIR, self.filenames[idx]))
+        img_path = os.path.join(self.ROOT_DIR, self.filenames[idx])
         if os.path.exists(img_path):
             image = Image.open(img_path)
         else:
@@ -477,7 +487,7 @@ class AnomalousMRIDataset(Dataset):
                  # transforms.RandomAffine(0, translate=(0.02, 0.1)),
                  # transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR),
                  # transforms.CenterCrop(256),
-                 ResizeWithPadding(target_size=img_size),
+                 ResizeWithPadding(target_size=256),
                  transforms.ToTensor(),
                  transforms.Normalize((0.5), (0.5))
                 ]) if not transform else transform
@@ -498,7 +508,7 @@ class AnomalousMRIDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        img_path = os.path.exists(os.path.join(self.ROOT_DIR, self.filenames[idx]))
+        img_path = os.path.join(self.ROOT_DIR, self.filenames[idx])
         if os.path.exists(img_path):
             image = Image.open(img_path)
         else:
@@ -513,9 +523,9 @@ class AnomalousMRIDataset(Dataset):
         # "D:\Datasets\OPMED_proc\test\mask_test\sub-00003_acq-T2sel_FLAIR_roi_88.png"
         # test_sample: 
         # "D:\Datasets\OPMED_proc\test\FLAIR_test\sub-00003_acq-T2sel_FLAIR_88.png"
-        match = re.search(r"([A-Za-z]+_\d+\.png)$", self.filenames[idx])
+        match = re.search(r"([A-Za-z]+)_(\d+\.png)$", self.filenames[idx])
         if match:
-            mask_filename = self.filenames[idx][:match.start(1)] + "_roi" + self.filenames[idx][match.start(1):]
+            mask_filename = self.filenames[idx][:match.start(2)] + "roi_" + self.filenames[idx][match.start(2):]
             mask_path = os.path.join(self.MASK_DIR, mask_filename)
             if os.path.exists(img_path):
                 mask = Image.open(mask_path)
@@ -550,23 +560,24 @@ def load_CIFAR10(args, train=True):
 
 
 if __name__ == "__main__":
-    # load_datasets_for_test()
+    
     # get_segmented_labels(True)
     # main(False, False, 0)
     # make_pngs_anogan()
     import matplotlib.pyplot as plt
     import helpers
 
-    d_set = AnomalousMRIDataset(
-            ROOT_DIR='./DATASETS/CancerousDataset/EdinburghDataset/Anomalous-T1', img_size=(256, 256),
-            slice_selection="iterateKnown_restricted", resized=False
-            )
-    loader = init_dataset_loader(d_set, {"Batch_Size": 16})
+    load_datasets_for_test()
+    # d_set = AnomalousMRIDataset(
+    #         ROOT_DIR='./DATASETS/CancerousDataset/EdinburghDataset/Anomalous-T1', img_size=(256, 256),
+    #         slice_selection="iterateKnown_restricted", resized=False
+    #         )
+    # loader = init_dataset_loader(d_set, {"Batch_Size": 16})
 
-    for i in range(4):
-        new = next(loader)
-        plt.imshow(helpers.gridify_output(new["image"], 4), cmap="gray")
-        plt.show()
-        plt.imshow(helpers.gridify_output(new["mask"], 4), cmap="gray")
-        plt.show()
-        plt.pause(1)
+    # for i in range(4):
+    #     new = next(loader)
+    #     plt.imshow(helpers.gridify_output(new["image"], 4), cmap="gray")
+    #     plt.show()
+    #     plt.imshow(helpers.gridify_output(new["mask"], 4), cmap="gray")
+    #     plt.show()
+    #     plt.pause(1)

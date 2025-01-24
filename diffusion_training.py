@@ -320,38 +320,6 @@ def main():
                                                             dataset.load_CIFAR10(args, False)
         training_dataset_loader = dataset.cycle(training_dataset_loader_)
         testing_dataset_loader = dataset.cycle(testing_dataset_loader_)
-    elif args["dataset"].lower() == "carpet":
-        training_dataset = dataset.DAGM(
-                "./DATASETS/CARPET/Class1", False, args["img_size"],
-                False
-                )
-        training_dataset_loader = dataset.init_dataset_loader(training_dataset, args)
-        testing_dataset = dataset.DAGM(
-                "./DATASETS/CARPET/Class1", True, args["img_size"],
-                False
-                )
-        testing_dataset_loader = dataset.init_dataset_loader(testing_dataset, args)
-    elif args["dataset"].lower() == "leather":
-        if in_channels == 3:
-            training_dataset = dataset.MVTec(
-                    "./DATASETS/leather", anomalous=False, img_size=args["img_size"],
-                    rgb=True
-                    )
-            testing_dataset = dataset.MVTec(
-                    "./DATASETS/leather", anomalous=True, img_size=args["img_size"],
-                    rgb=True, include_good=True
-                    )
-        else:
-            training_dataset = dataset.MVTec(
-                    "./DATASETS/leather", anomalous=False, img_size=args["img_size"],
-                    rgb=False
-                    )
-            testing_dataset = dataset.MVTec(
-                    "./DATASETS/leather", anomalous=True, img_size=args["img_size"],
-                    rgb=False, include_good=True
-                    )
-        training_dataset_loader = dataset.init_dataset_loader(training_dataset, args)
-        testing_dataset_loader = dataset.init_dataset_loader(testing_dataset, args)
     else:
         # load NFBS dataset
         training_dataset, testing_dataset = dataset.init_datasets(ROOT_DIR, args)
