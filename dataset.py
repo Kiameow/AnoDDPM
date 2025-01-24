@@ -2,9 +2,11 @@ import os
 from random import randint
 
 import cv2
+import re
 import nibabel as nib
 import numpy as np
 import torch
+from PIL import Image
 from matplotlib import animation
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
@@ -369,213 +371,44 @@ def init_dataset_loader(mri_dataset, args, shuffle=True):
 
     return dataset_loader
 
+class ResizeWithPadding:
+    def __init__(self, target_size=(256, 256)):
+        self.target_size = target_size
 
-class DAGM(Dataset):
-    def __init__(self, dir, anomalous=False, img_size=(256, 256), rgb=False, random_crop=True):
-        # dir = './DATASETS/Carpet/Class1'
-        if anomalous and dir[-4:] != "_def":
-            dir += "_def"
-        self.ROOT_DIR = dir
-        self.anomalous = anomalous
-        if rgb:
-            norm_const = ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    def __call__(self, image):
+        width, height = image.size
+        
+        # 计算缩放比例
+        if width > height:
+            new_width = self.target_size
+            new_height = int(height * (self.target_size / width))
         else:
-            norm_const = ((0.5), (0.5))
-
-        if random_crop:
-            self.transform = transforms.Compose(
-                    [
-                        transforms.ToPILImage(),
-                        transforms.ToTensor(),
-                        transforms.Normalize(*norm_const)
-                        ]
-                    )
-        else:
-            self.transform = transforms.Compose(
-                    [
-                        transforms.ToPILImage(),
-                        transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR),
-                        transforms.ToTensor(),
-                        transforms.Normalize(*norm_const)
-                        ]
-                    )
-        self.rgb = rgb
-        self.img_size = img_size
-        self.random_crop = random_crop
-        if anomalous:
-            self.coord_info = self.load_coordinates(os.path.join(self.ROOT_DIR, "labels.txt"))
-        self.filenames = os.listdir(self.ROOT_DIR)
-        for i in self.filenames[:]:
-            if not i.endswith(".png"):
-                self.filenames.remove(i)
-        self.filenames = sorted(self.filenames, key=lambda x: int(x[:-4]))
-
-    def load_coordinates(self, path_to_coor):
-        '''
-        '''
-
-        coord_dict_all = {}
-        with open(path_to_coor) as f:
-            coordinates = f.read().split('\n')
-            for coord in coordinates:
-                # print(len(coord.split('\t')))
-                if len(coord.split('\t')) == 6:
-                    coord_dict = {}
-                    coord_split = coord.split('\t')
-                    # print(coord_split)
-                    # print('\n')
-                    coord_dict['major_axis'] = round(float(coord_split[1]))
-                    coord_dict['minor_axis'] = round(float(coord_split[2]))
-                    coord_dict['angle'] = float(coord_split[3])
-                    coord_dict['x'] = round(float(coord_split[4]))
-                    coord_dict['y'] = round(float(coord_split[5]))
-                    index = int(coord_split[0]) - 1
-                    coord_dict_all[index] = coord_dict
-
-        return coord_dict_all
-
-    def make_mask(self, idx, img):
-        mask = np.zeros_like(img)
-        mask = cv2.ellipse(
-                mask,
-                (int(self.coord_info[idx]['x']), int(self.coord_info[idx]['y'])),
-                (int(self.coord_info[idx]['major_axis']), int(self.coord_info[idx]['minor_axis'])),
-                (self.coord_info[idx]['angle'] / 4.7) * 270,
-                0,
-                360,
-                (255, 255, 255),
-                -1
-                )
-
-        mask[mask > 0] = 255
-        return mask
-
-    def __len__(self):
-        return len(self.filenames)
-
-    def __getitem__(self, idx):
-
-        # print(repr(idx))
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        sample = {"filenames": self.filenames[idx]}
-        if self.rgb:
-            sample["image"] = cv2.imread(os.path.join(self.ROOT_DIR, self.filenames[idx]), 1)
-            # sample["image"] = Image.open(os.path.join(self.ROOT_DIR, self.filenames[idx]), "r")
-        else:
-            sample["image"] = cv2.imread(os.path.join(self.ROOT_DIR, self.filenames[idx]), 0)
-
-        if self.anomalous:
-            sample["mask"] = self.make_mask(int(self.filenames[idx][:-4]) - 1, sample["image"])
-        if self.random_crop:
-            x1 = randint(0, sample["image"].shape[-1] - self.img_size[1])
-            y1 = randint(0, sample["image"].shape[-2] - self.img_size[0])
-            if self.anomalous:
-                sample["mask"] = sample["mask"][x1:x1 + self.img_size[1], y1:y1 + self.img_size[0]]
-            sample["image"] = sample["image"][x1:x1 + self.img_size[1], y1:y1 + self.img_size[0]]
-
-        if self.transform:
-            image = self.transform(sample["image"])
-            if self.anomalous:
-                sample["mask"] = self.transform(sample["mask"])
-                sample["mask"] = (sample["mask"] > 0).float()
-        sample["image"] = image.reshape(1, *self.img_size)
-
-        return sample
-
-
-class MVTec(Dataset):
-    def __init__(self, dir, anomalous=False, img_size=(256, 256), rgb=True, random_crop=True, include_good=False):
-        # dir = './DATASETS/leather'
-
-        self.ROOT_DIR = dir
-        self.anomalous = anomalous
-        if not anomalous:
-            self.ROOT_DIR += "/train/good"
-
-        transforms_list = [transforms.ToPILImage()]
-
-        if rgb:
-            channels = 3
-        else:
-            channels = 1
-            transforms_list.append(transforms.Grayscale(num_output_channels=channels))
-        transforms_mask_list = [transforms.ToPILImage(), transforms.Grayscale(num_output_channels=channels)]
-        if not random_crop:
-            transforms_list.append(transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR))
-            transforms_mask_list.append(transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR))
-        transforms_list.append(transforms.ToTensor())
-        transforms_mask_list.append(transforms.ToTensor())
-        if rgb:
-            transforms_list.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
-        else:
-            transforms_list.append(transforms.Normalize((0.5), (0.5)))
-        transforms_mask_list.append(transforms.Normalize((0.5), (0.5)))
-        self.transform = transforms.Compose(transforms_list)
-        self.transform_mask = transforms.Compose(transforms_mask_list)
-
-        self.rgb = rgb
-        self.img_size = img_size
-        self.random_crop = random_crop
-        self.classes = ["color", "cut", "fold", "glue", "poke"]
-        if include_good:
-            self.classes.append("good")
-        if anomalous:
-            self.filenames = [f"{self.ROOT_DIR}/test/{i}/{x}" for i in self.classes for x in
-                              os.listdir(self.ROOT_DIR + f"/test/{i}")]
-
-        else:
-            self.filenames = [f"{self.ROOT_DIR}/{i}" for i in os.listdir(self.ROOT_DIR)]
-
-        for i in self.filenames[:]:
-            if not i.endswith(".png"):
-                self.filenames.remove(i)
-        self.filenames = sorted(self.filenames, key=lambda x: int(x[-7:-4]))
-
-    def __len__(self):
-        return len(self.filenames)
-
-    def __getitem__(self, idx):
-        # print(repr(idx))
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        sample = {"filenames": self.filenames[idx]}
-        if self.rgb:
-            sample["image"] = cv2.cvtColor(cv2.imread(os.path.join(self.filenames[idx]), 1), cv2.COLOR_BGR2RGB)
-            # sample["image"] = Image.open(os.path.join(self.ROOT_DIR, self.filenames[idx]), "r")
-        else:
-            sample["image"] = cv2.imread(os.path.join(self.filenames[idx]), 0)
-            sample["image"] = sample["image"].reshape(*sample["image"].shape, 1)
-
-        if self.anomalous:
-            file = self.filenames[idx].split("/")
-            if file[-2] == "good":
-                sample["mask"] = np.zeros((sample["image"].shape[0], sample["image"].shape[1], 1)).astype(np.uint8)
-            else:
-                sample["mask"] = cv2.imread(
-                        os.path.join(self.ROOT_DIR, "ground_truth", file[-2], file[-1][:-4] + "_mask.png"), 0
-                        )
-        if self.random_crop:
-            x1 = randint(0, sample["image"].shape[-2] - self.img_size[1])
-            y1 = randint(0, sample["image"].shape[-3] - self.img_size[0])
-            if self.anomalous:
-                sample["mask"] = sample["mask"][x1:x1 + self.img_size[1], y1:y1 + self.img_size[0]]
-            sample["image"] = sample["image"][x1:x1 + self.img_size[1], y1:y1 + self.img_size[0]]
-
-        if self.transform:
-            sample["image"] = self.transform(sample["image"])
-            if self.anomalous:
-                sample["mask"] = self.transform_mask(sample["mask"])
-                sample["mask"] = (sample["mask"] > 0).float()
-
-        return sample
-
-
+            new_height = self.target_size
+            new_width = int(width * (self.target_size / height))
+        
+        # 缩放图像
+        resize_transform = transforms.Resize(
+            (new_height, new_width), 
+            transforms.InterpolationMode.BILINEAR
+        )
+        resized_image = resize_transform(image)
+        
+        # 计算填充尺寸
+        pad_left = (self.target_size - new_width) // 2
+        pad_top = (self.target_size - new_height) // 2
+        pad_right = self.target_size - new_width - pad_left
+        pad_bottom = self.target_size - new_height - pad_top
+        
+        # 填充图像
+        pad_transform = transforms.Pad((pad_left, pad_top, pad_right, pad_bottom), fill=0)
+        padded_image = pad_transform(resized_image)
+        
+        return padded_image
 
 class MRIDataset(Dataset):
     """Healthy MRI dataset."""
 
-    def __init__(self, ROOT_DIR, transform=None, img_size=(32, 32), random_slice=False):
+    def __init__(self, ROOT_DIR, transform=None, img_size=256, random_slice=False):
         """
         Args:
             ROOT_DIR (string): Directory with all the images.
@@ -583,15 +416,16 @@ class MRIDataset(Dataset):
                 on a sample.
         """
         self.transform = transforms.Compose(
-                [transforms.ToPILImage(),
-                 transforms.RandomAffine(3, translate=(0.02, 0.09)),
-                 transforms.CenterCrop(235),
-                 transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR),
-                 # transforms.CenterCrop(256),
-                 transforms.ToTensor(),
-                 transforms.Normalize((0.5), (0.5))
-                 ]
-                ) if not transform else transform
+            [
+                # transforms.RandomAffine(3, translate=(0.02, 0.09)),
+                # transforms.CenterCrop(235),
+                # transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR),
+                # transforms.CenterCrop(256),
+                ResizeWithPadding(target_size=img_size),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5), (0.5))
+            ]
+        ) if not transform else transform
 
         self.filenames = os.listdir(ROOT_DIR)
         if ".DS_Store" in self.filenames:
@@ -606,35 +440,13 @@ class MRIDataset(Dataset):
         # print(repr(idx))
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        if os.path.exists(os.path.join(self.ROOT_DIR, self.filenames[idx], f"{self.filenames[idx]}.npy")):
-            image = np.load(os.path.join(self.ROOT_DIR, self.filenames[idx], f"{self.filenames[idx]}.npy"))
-            pass
+            
+        img_path = os.path.exists(os.path.join(self.ROOT_DIR, self.filenames[idx]))
+        if os.path.exists(img_path):
+            image = Image.open(img_path)
         else:
-            img_name = os.path.join(
-                    self.ROOT_DIR, self.filenames[idx], f"sub-{self.filenames[idx]}_ses-NFB3_T1w.nii.gz"
-                    )
-            # random between 40 and 130
-            # print(nib.load(img_name).slicer[:,90:91,:].dataobj.shape)
-            img = nib.load(img_name)
-            image = img.get_fdata()
-
-            image_mean = np.mean(image)
-            image_std = np.std(image)
-            img_range = (image_mean - 1 * image_std, image_mean + 2 * image_std)
-            image = np.clip(image, img_range[0], img_range[1])
-            image = image / (img_range[1] - img_range[0])
-            np.save(
-                    os.path.join(self.ROOT_DIR, self.filenames[idx], f"{self.filenames[idx]}.npy"), image.astype(
-                            np.float32
-                            )
-                    )
-        if self.random_slice:
-            # slice_idx = randint(32, 122)
-            slice_idx = randint(40, 100)
-        else:
-            slice_idx = 80
-
-        image = image[:, slice_idx:slice_idx + 1, :].reshape(256, 192).astype(np.float32)
+            image = None
+            print(f"Error: Invalid image path {img_path}")
 
         if self.transform:
             image = self.transform(image)
@@ -647,7 +459,7 @@ class AnomalousMRIDataset(Dataset):
     """Anomalous MRI dataset."""
 
     def __init__(
-            self, ROOT_DIR, transform=None, img_size=(32, 32), slice_selection="random", resized=False,
+            self, ROOT_DIR, MASK_DIR, transform=None, img_size=256, slice_selection="random", resized=False,
             cleaned=True
             ):
         """
@@ -660,133 +472,64 @@ class AnomalousMRIDataset(Dataset):
                              "iterateKnown" = iterates between ranges of tumour using slice data
                              "iterateUnKnown" = iterates through whole MRI volume
         """
-        self.transform = transforms.Compose(
-                [transforms.ToPILImage(),
-                 transforms.CenterCrop((175, 240)),
+        self.transform = transforms.Compose([
+                 # transforms.CenterCrop((175, 240)),
                  # transforms.RandomAffine(0, translate=(0.02, 0.1)),
-                 transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR),
+                 # transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR),
                  # transforms.CenterCrop(256),
+                 ResizeWithPadding(target_size=img_size),
                  transforms.ToTensor(),
                  transforms.Normalize((0.5), (0.5))
-                 ]
-                ) if not transform else transform
+                ]) if not transform else transform
         self.img_size = img_size
         self.resized = resized
-        self.slices = {
-            "17904": range(165, 205), "18428": range(177, 213), "18582": range(160, 190), "18638": range(160, 212),
-            "18675": range(140, 200), "18716": range(135, 190), "18756": range(150, 205), "18863": range(130, 190),
-            "18886": range(120, 180), "18975": range(170, 194), "19015": range(158, 195), "19085": range(155, 195),
-            "19275": range(184, 213), "19277": range(158, 209), "19357": range(158, 210), "19398": range(164, 200),
-            "19423": range(142, 200), "19567": range(160, 200), "19628": range(147, 210), "19691": range(155, 200),
-            "19723": range(140, 170), "19849": range(150, 180)
-            }
 
-        self.filenames = self.slices.keys()
-        if cleaned:
-            self.filenames = list(map(lambda name: f"{ROOT_DIR}/raw_cleaned/{name}.npy", self.filenames))
-        else:
-            self.filenames = list(map(lambda name: f"{ROOT_DIR}/raw/{name}.npy", self.filenames))
-        # self.filenames = os.listdir(ROOT_DIR)
+        self.filenames = os.listdir(ROOT_DIR)
         if ".DS_Store" in self.filenames:
             self.filenames.remove(".DS_Store")
         self.ROOT_DIR = ROOT_DIR
+        self.MASK_DIR = MASK_DIR
         self.slice_selection = slice_selection
 
     def __len__(self):
         return len(self.filenames)
-
+ 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        if os.path.exists(os.path.join(f"{self.filenames[idx]}")):
-            if self.resized and os.path.exists(os.path.join(f"{self.filenames[idx][:-4]}-resized.npy")):
-                image = np.load(os.path.join(f"{self.filenames[idx][:-4]}-resized.npy"))
-            else:
-                image = np.load(os.path.join(f"{self.filenames[idx]}"))
+        img_path = os.path.exists(os.path.join(self.ROOT_DIR, self.filenames[idx]))
+        if os.path.exists(img_path):
+            image = Image.open(img_path)
         else:
-            img_name = os.path.join(self.filenames[idx])
-            # print(nib.load(img_name).slicer[:,90:91,:].dataobj.shape)
-            img = nib.load(img_name)
-            image = img.get_fdata()
-            image = np.rot90(image)
+            image = None
+            print(f"Error: Invalid image path {img_path}")
 
-            image_mean = np.mean(image)
-            image_std = np.std(image)
-            img_range = (image_mean - 1 * image_std, image_mean + 2 * image_std)
-            image = np.clip(image, img_range[0], img_range[1])
-            image = image / (img_range[1] - img_range[0])
-            np.save(
-                    os.path.join(f"{self.filenames[idx]}.npy"), image.astype(
-                            np.float32
-                            )
-                    )
+        if self.transform:
+            image = self.transform(image)
+
         sample = {}
-
-        if self.resized:
-            img_mask = np.load(f"{self.ROOT_DIR}/mask/{self.filenames[idx][-9:-4]}-resized.npy")
-        else:
-            img_mask = np.load(f"{self.ROOT_DIR}/mask/{self.filenames[idx][-9:-4]}.npy")
-        if self.slice_selection == "random":
-            temp_range = self.slices[self.filenames[idx][-9:-4]]
-            slice_idx = randint(temp_range.start, temp_range.stop)
-            image = image[slice_idx:slice_idx + 1, :, :].reshape(image.shape[1], image.shape[2]).astype(np.float32)
-            if self.transform:
-                image = self.transform(image)
-                # image = transforms.functional.rotate(image, -90)
-            sample["slices"] = slice_idx
-        elif self.slice_selection == "iterateKnown":
-            temp_range = self.slices[self.filenames[idx][-9:-4]]
-            output = torch.empty(temp_range.stop - temp_range.start, *self.img_size)
-            output_mask = torch.empty(temp_range.stop - temp_range.start, *self.img_size)
-
-            for i, val in enumerate(temp_range):
-                temp = image[val, ...].reshape(image.shape[1], image.shape[2]).astype(np.float32)
-                temp_mask = img_mask[val, ...].reshape(image.shape[1], image.shape[2]).astype(np.float32)
+        # mask: 
+        # "D:\Datasets\OPMED_proc\test\mask_test\sub-00003_acq-T2sel_FLAIR_roi_88.png"
+        # test_sample: 
+        # "D:\Datasets\OPMED_proc\test\FLAIR_test\sub-00003_acq-T2sel_FLAIR_88.png"
+        match = re.search(r"([A-Za-z]+_\d+\.png)$", self.filenames[idx])
+        if match:
+            mask_filename = self.filenames[idx][:match.start(1)] + "_roi" + self.filenames[idx][match.start(1):]
+            mask_path = os.path.join(self.MASK_DIR, mask_filename)
+            if os.path.exists(img_path):
+                mask = Image.open(mask_path)
+                
                 if self.transform:
-                    temp = self.transform(temp)
-                    temp_mask = self.transform(temp_mask)
-                output[i, ...] = temp
-                output_mask[i, ...] = temp_mask
-
-            image = output
-            sample["slices"] = temp_range
-            sample["mask"] = (output_mask > 0).float()
-
-        elif self.slice_selection == "iterateKnown_restricted":
-
-            temp_range = self.slices[self.filenames[idx][-9:-4]]
-            output = torch.empty(4, *self.img_size)
-            output_mask = torch.empty(4, *self.img_size)
-            slices = np.linspace(temp_range.start + 5, temp_range.stop - 5, 4).astype(np.int32)
-            for counter, i in enumerate(slices):
-                temp = image[i, ...].reshape(image.shape[1], image.shape[2]).astype(np.float32)
-                temp_mask = img_mask[i, ...].reshape(image.shape[1], image.shape[2]).astype(np.float32)
-                if self.transform:
-                    temp = self.transform(temp)
-                    temp_mask = self.transform(temp_mask)
-                output[counter, ...] = temp
-                output_mask[counter, ...] = temp_mask
-            image = output
-            sample["slices"] = slices
-            sample["mask"] = (output_mask > 0).float()
-
-        elif self.slice_selection == "iterateUnknown":
-
-            output = torch.empty(image.shape[0], *self.img_size)
-            for i in range(image.shape[0]):
-                temp = image[i:i + 1, :, :].reshape(image.shape[1], image.shape[2]).astype(np.float32)
-                if self.transform:
-                    temp = self.transform(temp)
-                    # temp = transforms.functional.rotate(temp, -90)
-                output[i, ...] = temp
-
-            image = output
-            sample["slices"] = image.shape[0]
-
+                    mask = self.transform(mask)
+                    mask = (mask > 0).float()
+            else:
+                mask = None
+            
+        # missing slices, wonder if it is necessary
         sample["image"] = image
         sample["filenames"] = self.filenames[idx]
-        # sample = {'image': image, "filenames": self.filenames[idx], "slices":slice_idx}
+        sample["mask"] = mask
         return sample
 
 
@@ -814,13 +557,10 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import helpers
 
-    d_set = MVTec(
-            './DATASETS/leather', True, img_size=(256, 256), rgb=False
+    d_set = AnomalousMRIDataset(
+            ROOT_DIR='./DATASETS/CancerousDataset/EdinburghDataset/Anomalous-T1', img_size=(256, 256),
+            slice_selection="iterateKnown_restricted", resized=False
             )
-    # d_set = AnomalousMRIDataset(
-    #         ROOT_DIR='./DATASETS/CancerousDataset/EdinburghDataset/Anomalous-T1', img_size=(256, 256),
-    #         slice_selection="iterateKnown_restricted", resized=False
-    #         )
     loader = init_dataset_loader(d_set, {"Batch_Size": 16})
 
     for i in range(4):
