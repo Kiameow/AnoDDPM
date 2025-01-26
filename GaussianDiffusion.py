@@ -93,11 +93,51 @@ def discretised_gaussian_log_likelihood(x, means, log_scales):
     return log_probs
 
 
+# def generate_simplex_noise(
+#         Simplex_instance, x, t, random_param=False, octave=6, persistence=0.8, frequency=64,
+#         in_channels=1
+#         ):
+#     batch_size = x.shape[0]  # 获取批次大小
+#     height, width = x.shape[-2:]  # 获取图像的高度和宽度
+#     noise = torch.empty(x.shape).to(x.device)  # 初始化噪声张量
+
+#     for i in range(in_channels):
+#         Simplex_instance.newSeed()
+#         if random_param:
+#             param = random.choice(
+#                     [(2, 0.6, 16), (6, 0.6, 32), (7, 0.7, 32), (10, 0.8, 64), (5, 0.8, 16), (4, 0.6, 16), (1, 0.6, 64),
+#                      (7, 0.8, 128), (6, 0.9, 64), (2, 0.85, 128), (2, 0.85, 64), (2, 0.85, 32), (2, 0.85, 16),
+#                      (2, 0.85, 8),
+#                      (2, 0.85, 4), (2, 0.85, 2), (1, 0.85, 128), (1, 0.85, 64), (1, 0.85, 32), (1, 0.85, 16),
+#                      (1, 0.85, 8),
+#                      (1, 0.85, 4), (1, 0.85, 2), ]
+#                     )
+#             # 对每个批次单独生成噪声
+#             for b in range(batch_size):
+#                 noise[b, i, ...] = torch.from_numpy(
+#                     Simplex_instance.rand_3d_fixed_T_octaves(
+#                         (height, width), t[b].detach().cpu().numpy(), param[0], param[1], param[2]
+#                     )
+#                 ).to(x.device)
+#         else:
+#             # 对每个批次单独生成噪声
+#             for b in range(batch_size):
+#                 noise[b, i, ...] = torch.from_numpy(
+#                     Simplex_instance.rand_3d_fixed_T_octaves(
+#                         (height, width), t[b].detach().cpu().numpy(), octave, persistence, frequency
+#                     )
+#                 ).to(x.device)
+
+#     return noise
+
 def generate_simplex_noise(
         Simplex_instance, x, t, random_param=False, octave=6, persistence=0.8, frequency=64,
         in_channels=1
         ):
-    noise = torch.empty(x.shape).to(x.device)
+    batch_size = x.shape[0]  # 获取批次大小
+    height, width = x.shape[-2:]  # 获取图像的高度和宽度
+    noise = torch.empty(x.shape).to(x.device)  # 初始化噪声张量
+
     for i in range(in_channels):
         Simplex_instance.newSeed()
         if random_param:
@@ -109,31 +149,26 @@ def generate_simplex_noise(
                      (1, 0.85, 8),
                      (1, 0.85, 4), (1, 0.85, 2), ]
                     )
-            # 2D octaves seem to introduce directional artifacts in the top left
-            noise[:, i, ...] = torch.unsqueeze(
-                    torch.from_numpy(
-                            # Simplex_instance.rand_2d_octaves(
-                            #         x.shape[-2:], param[0], param[1],
-                            #         param[2]
-                            #         )
-                            Simplex_instance.rand_3d_fixed_T_octaves(
-                                    x.shape[-2:], t.detach().cpu().numpy(), param[0], param[1],
-                                    param[2]
-                                    )
-                            ).to(x.device), 0
-                    ).repeat(x.shape[0], 1, 1, 1)
-        noise[:, i, ...] = torch.unsqueeze(
-                torch.from_numpy(
-                        # Simplex_instance.rand_2d_octaves(
-                        #         x.shape[-2:], octave,
-                        #         persistence, frequency
-                        #         )
-                        Simplex_instance.rand_3d_fixed_T_octaves(
-                                x.shape[-2:], t.detach().cpu().numpy(), octave,
-                                persistence, frequency
-                                )
-                        ).to(x.device), 0
-                ).repeat(x.shape[0], 1, 1, 1)
+            # 对每个批次单独生成噪声
+            for b in range(batch_size):
+                # 将 t[b] 转换为形状为 (1,) 的数组
+                T_array = np.array([t[b].detach().cpu().numpy()])
+                noise[b, i, ...] = torch.from_numpy(
+                    Simplex_instance.rand_3d_fixed_T_octaves(
+                        (height, width), T_array, param[0], param[1], param[2]
+                    )
+                ).to(x.device)
+        else:
+            # 对每个批次单独生成噪声
+            for b in range(batch_size):
+                # 将 t[b] 转换为形状为 (1,) 的数组
+                T_array = np.array([t[b].detach().cpu().numpy()])
+                noise[b, i, ...] = torch.from_numpy(
+                    Simplex_instance.rand_3d_fixed_T_octaves(
+                        (height, width), T_array, octave, persistence, frequency
+                    )
+                ).to(x.device)
+
     return noise
 
 
