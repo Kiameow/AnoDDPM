@@ -30,6 +30,7 @@ def train(training_dataset_loader, testing_dataset_loader, args, resume):
     :return: Trained model and tested
     """
 
+    print("========start training=========")
     in_channels = 1
     if args["dataset"].lower() == "cifar" or args["dataset"].lower() == "leather":
         in_channels = 3
