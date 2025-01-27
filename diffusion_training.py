@@ -108,7 +108,7 @@ def train(training_dataset_loader, testing_dataset_loader, args, resume):
             update_ema_params(ema, model)
             mean_loss.append(loss.data.cpu())
 
-            if epoch % 50 == 0 and i == 0:
+            if epoch % 1 == 0 and i == 0:
                 row_size = min(8, args['Batch_Size'])
                 training_outputs(
                         diffusion, x, est, noisy, epoch, row_size, save_imgs=args['save_imgs'],
@@ -116,7 +116,7 @@ def train(training_dataset_loader, testing_dataset_loader, args, resume):
                         )
 
         losses.append(np.mean(mean_loss))
-        if epoch % 20 == 0:
+        if epoch % 1 == 0:
             time_taken = time.time() - start_time
             remaining_epochs = args['EPOCHS'] - epoch
             time_per_epoch = time_taken / (epoch + 1 - start_epoch)
@@ -146,7 +146,7 @@ def train(training_dataset_loader, testing_dataset_loader, args, resume):
             #             f"{((time_taken / 3600) % 1) * 60:02.0f}, est time remaining: {hours}:{mins:02.0f}\r"
             #             )
 
-        if epoch % 300 == 0 and epoch >= 0:
+        if epoch % 5 == 0 and epoch >= 0:
             save(unet=model, args=args, optimiser=optimiser, final=False, ema=ema, epoch=epoch)
 
     save(unet=model, args=args, optimiser=optimiser, final=True, ema=ema)
